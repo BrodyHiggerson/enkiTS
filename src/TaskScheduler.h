@@ -125,6 +125,7 @@ namespace enki
         // ICompletable::OnDependenciesComplete( pTaskScheduler_, threadNum_ );
         // in your implementation.
         virtual void                   OnDependenciesComplete( TaskScheduler* pTaskScheduler_, uint32_t threadNum_ );
+        virtual bool                   CanRun(TaskScheduler* pTaskScheduler_, uint32_t threadNum_) { return true; }
     private:
         friend class                   TaskScheduler;
         friend class                   Dependency;

@@ -562,6 +562,7 @@ bool TaskScheduler::TryRunTask( uint32_t threadNum_, uint32_t priority_, uint32_
     // check for tasks
     SubTaskSet subTask;
     bool bHaveTask = m_pPipesPerThread[ priority_ ][ threadNum_ ].WriterTryReadFront( &subTask );
+    uint32_t threadReadFrom = threadNum_;
 
     uint32_t threadToCheckStart = hintPipeToCheck_io_ % m_NumThreads;
     uint32_t threadToCheck      = threadToCheckStart;
@@ -569,6 +570,8 @@ bool TaskScheduler::TryRunTask( uint32_t threadNum_, uint32_t priority_, uint32_
     if( !bHaveTask )
     {
         bHaveTask = m_pPipesPerThread[ priority_ ][ threadToCheck ].ReaderTryReadBack( &subTask );
+        threadReadFrom = threadToCheck;
+
         if( !bHaveTask )
         {
             // To prevent many threads checking the same task pipe for work we pseudorandomly distribute
@@ -582,6 +585,7 @@ bool TaskScheduler::TryRunTask( uint32_t threadNum_, uint32_t priority_, uint32_
                 if( threadToCheck != threadNum_ && threadToCheckOffset != threadToCheckStart )
                 {
                     bHaveTask = m_pPipesPerThread[ priority_ ][ threadToCheck ].ReaderTryReadBack( &subTask );
+                    threadReadFrom = threadToCheck;
                 }
                 ++checkCount;
             }
@@ -590,6 +594,13 @@ bool TaskScheduler::TryRunTask( uint32_t threadNum_, uint32_t priority_, uint32_
 
     if( bHaveTask )
     {
+        if (!subTask.pTask->CanRun(this, threadNum_))
+        {
+            // #TODO handle this failing
+            assert(m_pPipesPerThread[priority_][threadReadFrom].WriterTryWriteFront(subTask));
+            return false;
+        }
+
         // update hint, will preserve value unless actually got task from another thread.
         hintPipeToCheck_io_ = threadToCheck;
 
@@ -967,8 +978,15 @@ void TaskScheduler::RunPinnedTasks( uint32_t threadNum_, uint32_t priority_ )
     do
     {
         pPinnedTaskSet = m_pPinnedTaskListPerThread[ priority_ ][ threadNum_ ].ReaderReadBack();
-        if( pPinnedTaskSet )
+        if (pPinnedTaskSet)
         {
+            // Push back into the writer as ReaderReadBack removes
+            if (!pPinnedTaskSet->CanRun(this, threadNum_))
+            {
+                m_pPinnedTaskListPerThread[priority_][threadNum_].WriterWriteFront(pPinnedTaskSet);
+                continue;
+            }
+
             pPinnedTaskSet->Execute();
             pPinnedTaskSet->m_RunningCount.fetch_sub(1,std::memory_order_acq_rel);
             TaskComplete( pPinnedTaskSet, true, threadNum_ );
